@@ -7,17 +7,26 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 interface FileDropzoneProps {
-  onFileSelect?: (file: File) => void
+  onFilesAdded?: (files: File[]) => void
 }
 
-export function FileDropzone({ onFileSelect }: FileDropzoneProps) {
+export function FileDropzone({ onFilesAdded }: FileDropzoneProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [isDragging, setIsDragging] = useState(false)
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      onFileSelect?.(e.target.files[0])
-      // Reset input value to allow selecting the same file again
+      const validFiles = Array.from(e.target.files).filter(file => {
+        const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+        return ['.xlsx', '.csv', '.json'].includes(ext);
+      });
+
+      if (validFiles.length > 0) {
+        onFilesAdded?.(validFiles);
+      } else {
+        alert("Only .xlsx and .csv files are supported.")
+      }
+
       e.target.value = ''
     }
   }
@@ -40,13 +49,13 @@ export function FileDropzone({ onFileSelect }: FileDropzoneProps) {
     setIsDragging(false)
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const file = e.dataTransfer.files[0]
-      // Strict check: .xlsx, .csv, .json
-      const validExtensions = ['.xlsx', '.csv', '.json']
-      const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase()
+      const validFiles = Array.from(e.dataTransfer.files).filter(file => {
+        const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+        return ['.xlsx', '.csv', '.json'].includes(ext);
+      });
 
-      if (validExtensions.includes(fileExtension)) {
-        onFileSelect?.(file)
+      if (validFiles.length > 0) {
+        onFilesAdded?.(validFiles)
       } else {
         alert("Only .xlsx and .csv files are supported.")
       }
@@ -69,6 +78,7 @@ export function FileDropzone({ onFileSelect }: FileDropzoneProps) {
       <input
         ref={inputRef}
         type="file"
+        multiple
         className="hidden"
         onChange={handleChange}
         accept=".xlsx,.csv,.json"

@@ -10,7 +10,7 @@ interface GSTStore {
     setStep: (step: number) => void;
 
     // File processing state
-    rawFile: File | null;
+    rawFiles: File[];
     sourceType: 'excel' | 'json';
     isProcessing: boolean;
     processingError: string | null;
@@ -25,15 +25,16 @@ interface GSTStore {
     validationSummary: ValidationSummary;
 
     // Actions
-    uploadFile: (file: File) => Promise<void>;
-    processFile: () => Promise<void>;
+    addFiles: (files: File[]) => void;
+    removeFile: (index: number) => void;
+    processFiles: () => Promise<void>;
     reset: () => void;
     downloadJSON: (gstin: string, filingPeriod: string) => void;
 }
 
 export const useGSTStore = create<GSTStore>((set, get) => ({
     currentStep: 1,
-    rawFile: null,
+    rawFiles: [],
     sourceType: 'excel',
     isProcessing: false,
     processingError: null,
@@ -47,73 +48,70 @@ export const useGSTStore = create<GSTStore>((set, get) => ({
 
     setReturnType: (type) => set({ returnType: type }), // Toggle logic
 
-    uploadFile: async (file) => {
-        const isJSON = file.name.toLowerCase().endsWith('.json');
-        set({ rawFile: file, sourceType: isJSON ? 'json' : 'excel', currentStep: 2 });
-
-        if (isJSON) {
-            // Handle JSON file directly
-            set({ isProcessing: true, processingError: null });
-            try {
-                const result = await readJSONFile(file);
-                set({
-                    b2bInvoices: result.b2bInvoices,
-                    cdnrInvoices: [],
-                    errors: [],
-                    validationSummary: {
-                        valid: result.b2bInvoices.length,
-                        error: 0,
-                        total: result.b2bInvoices.length
-                    },
-                    isProcessing: false,
-                    returnType: 'B2B',
-                });
-            } catch (error) {
-                set({
-                    isProcessing: false,
-                    processingError: error instanceof Error ? error.message : "Failed to parse JSON",
-                });
-            }
-        } else {
-            // Handle Excel file
-            await get().processFile();
-        }
+    addFiles: (files) => {
+        set((state) => ({
+            rawFiles: [...state.rawFiles, ...files],
+            currentStep: 1 // Stay on step 1 (preview state)
+        }));
     },
 
-    processFile: async () => {
-        const { rawFile, returnType } = get();
-        if (!rawFile) return;
+    removeFile: (index) => {
+        set((state) => {
+            const newFiles = [...state.rawFiles];
+            newFiles.splice(index, 1);
+            return { rawFiles: newFiles };
+        });
+    },
+
+    processFiles: async () => {
+        const { rawFiles, returnType } = get();
+        if (rawFiles.length === 0) return;
 
         set({ isProcessing: true, processingError: null });
 
         try {
-            // Pass the returnType (B2B or CDNR) to the processor
             const { processExcelFile } = await import("@/lib/services/excel-processor");
-            const result: ProcessingResult = await processExcelFile(rawFile, returnType);
 
-            if (returnType === 'B2B') {
-                set({
-                    b2bInvoices: result.invoices as B2BInvoice[], // Type casting based on context
-                    cdnrInvoices: [],
-                    errors: result.errors,
-                    validationSummary: result.summary,
-                    isProcessing: false,
-                });
-            } else {
-                set({
-                    b2bInvoices: [],
-                    cdnrInvoices: result.invoices as CDNRInvoice[],
-                    errors: result.errors,
-                    validationSummary: result.summary,
-                    isProcessing: false,
-                });
+            // Accumulators
+            let allB2B: B2BInvoice[] = [];
+            let allCDNR: CDNRInvoice[] = [];
+            let allErrors: ErrorRow[] = [];
+            let totalSummary = { total: 0, valid: 0, error: 0 };
+            const globalSeenSet = new Set<string>();
+
+            // Process all files
+            for (const file of rawFiles) {
+                const result = await processExcelFile(file, returnType, globalSeenSet);
+                if (returnType === 'B2B') {
+                    // We need to merge invoices carefully. 
+                    // ideally we should flatten them all then run 'group' again, but processExcelFile returns grouped invoices.
+                    // Simple Concat for now. Collisions within files handled by processor. Collisions across files not handled yet (acceptable MVP).
+                    allB2B = [...allB2B, ...(result.invoices as B2BInvoice[])];
+                } else {
+                    allCDNR = [...allCDNR, ...(result.invoices as CDNRInvoice[])];
+                }
+
+                // Merge Errors & Summary
+                allErrors = [...allErrors, ...result.errors];
+                totalSummary.total += result.summary.total;
+                totalSummary.valid += result.summary.valid;
+                totalSummary.error += result.summary.error;
             }
+
+            set({
+                b2bInvoices: allB2B,
+                cdnrInvoices: allCDNR,
+                errors: allErrors,
+                validationSummary: totalSummary,
+                isProcessing: false,
+                currentStep: 2 // Move to dashboard
+            });
 
         } catch (error) {
             console.error("Processing failed:", error);
             set({
                 isProcessing: false,
-                processingError: error instanceof Error ? error.message : "Failed to process file",
+                processingError: error instanceof Error ? error.message : "Failed to process files",
             });
         }
     },
@@ -121,7 +119,7 @@ export const useGSTStore = create<GSTStore>((set, get) => ({
     reset: () => {
         set({
             currentStep: 1,
-            rawFile: null,
+            rawFiles: [],
             isProcessing: false,
             processingError: null,
             validationSummary: { total: 0, valid: 0, error: 0 },
@@ -292,7 +290,7 @@ export const useGSTStore = create<GSTStore>((set, get) => ({
 
 // Selector hooks
 export const useCurrentStep = () => useGSTStore((state) => state.currentStep);
-export const useRawFile = () => useGSTStore((state) => state.rawFile);
+export const useRawFiles = () => useGSTStore((state) => state.rawFiles);
 export const useIsProcessing = () => useGSTStore((state) => state.isProcessing);
 export const useProcessingError = () => useGSTStore((state) => state.processingError);
 export const useReturnType = () => useGSTStore((state) => state.returnType);

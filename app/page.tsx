@@ -37,7 +37,11 @@ export default function GSTDashboard() {
   const processingError = useProcessingError()
 
   const returnType = useReturnType()
-  const uploadFile = useGSTStore((state) => state.uploadFile)
+  const rawFiles = useGSTStore((state) => state.rawFiles) // Updated selector
+  const addFiles = useGSTStore((state) => state.addFiles)
+  const removeFile = useGSTStore((state) => state.removeFile)
+  const processFiles = useGSTStore((state) => state.processFiles)
+
   const downloadJSON = useGSTStore((state) => state.downloadJSON)
   const reset = useGSTStore((state) => state.reset)
   const setReturnType = useGSTStore((state) => state.setReturnType)
@@ -66,8 +70,8 @@ export default function GSTDashboard() {
     setShowDownloadModal(true)
   }
 
-  const handleFileSelect = async (file: File) => {
-    await uploadFile(file)
+  const handleProcess = async () => {
+    await processFiles()
   }
 
   const handleDownload = () => {
@@ -109,16 +113,24 @@ export default function GSTDashboard() {
   })), [b2bInvoices])
 
   // Add error rows to table for display
-  const errorTableData = useMemo(() => errors.map((error, index) => ({
-    id: `error-${index}`,
-    invoiceNo: String(error.data.invoiceNumber || "Unknown"),
-    date: String(error.data.invoiceDate || "Unknown"),
-    party: "Unknown",
-    gstin: String(error.data.gstin || "Invalid"),
-    amount: Number(error.data.taxableValue) || 0,
-    taxAmount: 0,
-    status: "error" as const,
-  })), [errors])
+  const errorTableData = useMemo(() => errors.map((error, index) => {
+    // Check if it's a duplicate error
+    // Matches "Duplicate Invoice Number" from processor
+    const isDuplicate = error.errors.some(msg =>
+      String(msg).toLowerCase().includes("duplicate")
+    );
+
+    return {
+      id: `error-${index}`,
+      invoiceNo: String(error.data.invoiceNumber || "Unknown"),
+      date: String(error.data.invoiceDate || "Unknown"),
+      party: "Unknown",
+      gstin: String(error.data.gstin || "Invalid"),
+      amount: Number(error.data.taxableValue) || 0,
+      taxAmount: 0,
+      status: (isDuplicate ? "duplicate" : "error") as "duplicate" | "error",
+    }
+  }), [errors])
 
   const hasErrors = errors.length > 0
   const canDownload = b2bInvoices.length > 0 && !hasErrors
@@ -131,39 +143,72 @@ export default function GSTDashboard() {
 
         {/* State A: Upload State */}
         {currentStep === 1 && (
-          <div className="max-w-2xl mx-auto mt-12">
+          <div className="max-w-2xl mx-auto mt-12 space-y-8">
             {isProcessing ? (
               <div className="flex flex-col items-center justify-center h-64 gap-4">
                 <Loader2 className="w-12 h-12 animate-spin text-primary" />
-                <p className="text-lg font-medium">Processing your file...</p>
+                <p className="text-lg font-medium">Processing your files...</p>
                 <p className="text-sm text-muted-foreground">
-                  Parsing Excel, validating rows, and grouping invoices
+                  Validating invoices and aggregating data...
                 </p>
               </div>
             ) : (
               <>
-                <FileDropzone onFileSelect={handleFileSelect} />
+                {/* 1. Dropzone */}
+                <FileDropzone onFilesAdded={(files) => addFiles(files)} />
+
+                {/* 2. File Queue */}
+                {rawFiles.length > 0 && (
+                  <div className="bg-card glass-card rounded-xl p-6 border shadow-sm animate-in fade-in slide-in-from-bottom-4">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="font-semibold text-lg flex items-center gap-2">
+                        <FileText className="w-5 h-5 text-primary" />
+                        Selected Files ({rawFiles.length})
+                      </h3>
+                      <Button onClick={handleProcess} size="lg" className="btn-gradient">
+                        Process Files
+                      </Button>
+                    </div>
+
+                    <div className="space-y-3 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                      {rawFiles.map((file, idx) => (
+                        <div key={`${file.name}-${idx}`} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border group hover:border-primary/30 transition-all">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-lg bg-background flex items-center justify-center border text-muted-foreground">
+                              {file.name.endsWith('.csv') ? 'CSV' : 'XLS'}
+                            </div>
+                            <div>
+                              <p className="font-medium text-sm truncate max-w-[200px]">{file.name}</p>
+                              <p className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(1)} KB</p>
+                            </div>
+                          </div>
+                          <Button variant="ghost" size="icon" onClick={() => removeFile(idx)} className="text-muted-foreground hover:text-destructive">
+                            <span className="sr-only">Remove</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Help Section */}
-                <div className="mt-6 p-4 bg-muted/30 rounded-lg border">
+                <div className="p-4 bg-muted/30 rounded-lg border">
                   <h3 className="font-semibold text-sm mb-3">📋 How to Use:</h3>
                   <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
                     <li>Download the <a href="/GST_Template.xlsx" download className="text-primary underline font-medium">GST Excel Template</a></li>
                     <li>Fill your invoice data in the template (B2B sheet for sales, CDNR for returns)</li>
-                    <li>Upload the filled Excel file here</li>
-                    <li>Review the parsed data and fix any errors</li>
-                    <li>Generate JSON and upload to GST Portal</li>
+                    <li>Upload multiple Excel/CSV files at once</li>
+                    <li>Click <strong>Process Files</strong> to validate everything together</li>
                   </ol>
                 </div>
 
                 {processingError && (
-                  <div className="mt-4">
-                    <ValidationBanner
-                      variant="error"
-                      title="Processing Failed"
-                      description={processingError}
-                    />
-                  </div>
+                  <ValidationBanner
+                    variant="error"
+                    title="Processing Failed"
+                    description={processingError}
+                  />
                 )}
               </>
             )}

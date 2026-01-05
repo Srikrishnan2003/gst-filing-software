@@ -289,10 +289,11 @@ async function parseExcel(file: File, headerMappingDict: Record<string, string>)
     });
 }
 
-export async function processExcelFile(file: File, type: 'B2B' | 'CDNR' = 'B2B'): Promise<ProcessingResult> {
+export async function processExcelFile(file: File, type: 'B2B' | 'CDNR' = 'B2B', externalSeenSet?: Set<string>): Promise<ProcessingResult> {
     const processor = type === 'CDNR' ? CDNR_PROCESSOR : B2B_PROCESSOR;
     const rawRows = await parseExcel(file, processor.HEADER_MAPPINGS);
-    const { validRows, errorRows } = processor.validate(rawRows);
+    // @ts-ignore
+    const { validRows, errorRows } = processor.validate(rawRows, externalSeenSet);
     // @ts-ignore 
     const invoices = processor.group(validRows);
 

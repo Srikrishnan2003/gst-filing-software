@@ -238,10 +238,11 @@ export function cleanB2BRow(row: Record<string, unknown>): Record<string, unknow
     return cleaned;
 }
 
-export function validateB2BRows(rows: Record<string, unknown>[]): ValidationResult {
+export function validateB2BRows(rows: Record<string, unknown>[], externalSeenSet?: Set<string>): ValidationResult {
     const validRows: B2BInvoiceRow[] = [];
     const errorRows: ErrorRow[] = [];
-    const seenInvoices = new Set<string>();
+    // Use external set if provided (for multi-file batches), otherwise local
+    const seenInvoices = externalSeenSet || new Set<string>();
 
     rows.forEach((row, index) => {
         // Since we filtered junk rows, 'index' in this array corresponds to valid invoice seq number
@@ -257,15 +258,16 @@ export function validateB2BRows(rows: Record<string, unknown>[]): ValidationResu
 
         if (result.success) {
             const data = result.data;
-            // Duplicate Check: GSTIN + Invoice Number
-            // Only check if both exist (schema guarantees they do if success)
-            const uniqueKey = `${data.gstin}-${data.invoiceNumber}`.toUpperCase();
+            // Duplicate Check: Invoice Number MUST be unique for the supplier in a financial year
+            // We ignore the receiver's GSTIN for uniqueness check
+            const uniqueKey = data.invoiceNumber.toUpperCase();
 
+            // Check against the set (which might effectively correspond to "seen in this batch so far")
             if (seenInvoices.has(uniqueKey)) {
                 errorRows.push({
                     rowNumber,
                     data: row,
-                    errors: [`Duplicate Invoice: ${data.invoiceNumber} for GSTIN ${data.gstin} already exists in this file.`]
+                    errors: [`Duplicate Invoice Number: ${data.invoiceNumber} already exists.`]
                 });
             } else {
                 seenInvoices.add(uniqueKey);

@@ -1,7 +1,8 @@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { StatusBadge } from "./status-badge"
+import { cn } from "@/lib/utils"
 
-interface Invoice {
+interface InvoiceRow {
   id: string
   invoiceNo: string
   date: string
@@ -9,50 +10,70 @@ interface Invoice {
   gstin: string
   amount: number
   taxAmount: number
-  status: "valid" | "error"
+  status: "valid" | "error" | "duplicate"
 }
 
 interface InvoiceTableProps {
-  data: Invoice[]
+  data: InvoiceRow[]
 }
 
 export function InvoiceTable({ data }: InvoiceTableProps) {
+  if (data.length === 0) {
+    return (
+      <div className="text-center py-12 text-muted-foreground bg-muted/10 rounded-lg border border-dashed">
+        No invoices found in this category
+      </div>
+    )
+  }
+
   return (
-    <div className="border rounded-lg overflow-x-auto">
+    <div className="rounded-md border overflow-hidden">
       <Table>
-        <TableHeader>
-          <TableRow className="bg-muted/50">
-            <TableHead className="font-semibold">Invoice No</TableHead>
-            <TableHead className="font-semibold">Date</TableHead>
-            <TableHead className="font-semibold">Party Name</TableHead>
-            <TableHead className="font-semibold">GSTIN</TableHead>
-            <TableHead className="font-semibold text-right">Amount</TableHead>
-            <TableHead className="font-semibold text-right">Tax Amount</TableHead>
-            <TableHead className="font-semibold">Status</TableHead>
+        <TableHeader className="bg-muted/50">
+          <TableRow>
+            <TableHead>Invoice No</TableHead>
+            <TableHead>Date</TableHead>
+            <TableHead>Party Name</TableHead>
+            <TableHead>GSTIN</TableHead>
+            <TableHead className="text-right">Taxable Value</TableHead>
+            <TableHead className="text-right">Tax Amount</TableHead>
+            <TableHead className="text-center">Status</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {data.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={7} className="text-center py-8">
-                <p className="text-muted-foreground">No invoices found</p>
+          {data.map((row) => (
+            <TableRow
+              key={row.id}
+              className={cn(
+                row.status === "error" && "bg-destructive/5 hover:bg-destructive/10",
+                row.status === "duplicate" && "bg-orange-500/10 hover:bg-orange-500/20 dark:bg-orange-500/5"
+              )}
+            >
+              <TableCell className="font-medium">{row.invoiceNo}</TableCell>
+              <TableCell>{row.date}</TableCell>
+              <TableCell className="max-w-[200px] truncate" title={row.party}>
+                {row.party}
+              </TableCell>
+              <TableCell>{row.gstin}</TableCell>
+              <TableCell className="text-right">₹{row.amount.toLocaleString("en-IN")}</TableCell>
+              <TableCell className="text-right">₹{row.taxAmount.toLocaleString("en-IN")}</TableCell>
+              <TableCell className="text-center">
+                {row.status === "valid" ? (
+                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                    Valid
+                  </span>
+                ) : row.status === "duplicate" ? (
+                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
+                    Duplicate
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                    Error
+                  </span>
+                )}
               </TableCell>
             </TableRow>
-          ) : (
-            data.map((invoice) => (
-              <TableRow key={invoice.id} className="hover:bg-muted/30">
-                <TableCell className="font-medium">{invoice.invoiceNo}</TableCell>
-                <TableCell className="text-muted-foreground">{invoice.date}</TableCell>
-                <TableCell>{invoice.party}</TableCell>
-                <TableCell className="font-mono text-sm">{invoice.gstin}</TableCell>
-                <TableCell className="text-right font-medium">₹{invoice.amount.toLocaleString("en-IN")}</TableCell>
-                <TableCell className="text-right font-medium">₹{invoice.taxAmount.toLocaleString("en-IN")}</TableCell>
-                <TableCell>
-                  <StatusBadge status={invoice.status} />
-                </TableCell>
-              </TableRow>
-            ))
-          )}
+          ))}
         </TableBody>
       </Table>
     </div>
