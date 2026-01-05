@@ -115,19 +115,36 @@ export default function GSTDashboard() {
   // Add error rows to table for display
   const errorTableData = useMemo(() => errors.map((error, index) => {
     // Check if it's a duplicate error
-    // Matches "Duplicate Invoice Number" from processor
     const isDuplicate = error.errors.some(msg =>
       String(msg).toLowerCase().includes("duplicate")
     );
 
+    // Safely cast data to accessible object
+    const d = error.data as any;
+
+    // Resolve Party Name
+    const partyName = d.receiverName || d["Receiver Name"] || d["Billing Name"] || d["Party Name"] || "Unknown";
+
+    // Resolve Taxable Value
+    const taxable = Number(d.taxableValue || d["Taxable Value"] || 0);
+
+    // Calculate Tax Amount (Sum of components)
+    // Keys might be camelCase (if parsed) or Title Case (if raw)
+    const igst = Number(d.igstAmount || d["IGST Amount"] || d["Integrated Tax Amount"] || 0);
+    const cgst = Number(d.cgstAmount || d["CGST Amount"] || d["Central Tax Amount"] || 0);
+    const sgst = Number(d.sgstAmount || d["SGST Amount"] || d["State/UT Tax Amount"] || 0);
+    const cess = Number(d.cessAmount || d["Cess Amount"] || 0);
+
+    const taxAmt = igst + cgst + sgst + cess;
+
     return {
       id: `error-${index}`,
-      invoiceNo: String(error.data.invoiceNumber || "Unknown"),
-      date: String(error.data.invoiceDate || "Unknown"),
-      party: "Unknown",
-      gstin: String(error.data.gstin || "Invalid"),
-      amount: Number(error.data.taxableValue) || 0,
-      taxAmount: 0,
+      invoiceNo: String(d.invoiceNumber || d["Invoice No"] || d["Invoice Number"] || "Unknown"),
+      date: String(d.invoiceDate || d["Invoice Date"] || "Unknown"),
+      party: partyName,
+      gstin: String(d.gstin || d["GSTIN"] || "Invalid"),
+      amount: taxable,
+      taxAmount: taxAmt,
       status: (isDuplicate ? "duplicate" : "error") as "duplicate" | "error",
     }
   }), [errors])

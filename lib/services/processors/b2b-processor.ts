@@ -266,7 +266,7 @@ export function validateB2BRows(rows: Record<string, unknown>[], externalSeenSet
             if (seenInvoices.has(uniqueKey)) {
                 errorRows.push({
                     rowNumber,
-                    data: row,
+                    data: data, // Pass the parsed data so UI can show details!
                     errors: [`Duplicate Invoice Number: ${data.invoiceNumber} already exists.`]
                 });
             } else {
