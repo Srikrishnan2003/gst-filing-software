@@ -8,13 +8,15 @@ import { ProcessStepper } from "@/components/process-stepper"
 import { FileDropzone } from "@/components/file-dropzone"
 import { MetricCard } from "@/components/metric-card"
 import { ValidationBanner } from "@/components/validation-banner"
-// Lazy load heavy components
+// Lazy load heavy components (from friend's changes)
 const InvoiceTable = dynamic(() => import("@/components/invoice-table").then(mod => mod.InvoiceTable), {
   loading: () => <div className="h-64 bg-muted/20 animate-pulse rounded-lg" />
 })
 const TaxSummary = dynamic(() => import("@/components/tax-summary").then(mod => mod.TaxSummary), {
   loading: () => <div className="h-64 bg-muted/20 animate-pulse rounded-lg" />
 })
+// ErrorDetails component (from your stashed changes)
+import { ErrorDetails } from "@/components/error-details"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import {
@@ -81,7 +83,7 @@ export default function GSTDashboard() {
     }
   }
 
-  // Calculate totals for metric cards
+  // Calculate totals for metric cards (memoized from friend's changes)
   const { totalTaxableValue, totalTaxAmount, totalCgst, totalSgst, totalIgst } = useMemo(() => {
     return {
       totalTaxableValue: b2bInvoices.reduce((sum, inv) => sum + inv.totalTaxableValue, 0),
@@ -91,6 +93,53 @@ export default function GSTDashboard() {
       totalIgst: b2bInvoices.reduce((sum, inv) => sum + inv.totalIgst, 0)
     }
   }, [b2bInvoices])
+
+  // Calculate recipient-based summary (grouped by GSTIN)
+  const recipientSummary = (() => {
+    const recipientMap = new Map<string, {
+      gstin: string
+      receiverName?: string
+      invoiceCount: number
+      taxableValue: number
+      cgst: number
+      sgst: number
+      igst: number
+      cess: number
+      totalTax: number
+    }>()
+
+    b2bInvoices.forEach(inv => {
+      const existing = recipientMap.get(inv.gstin)
+      if (existing) {
+        existing.invoiceCount += 1
+        existing.taxableValue += inv.totalTaxableValue
+        existing.cgst += inv.totalCgst
+        existing.sgst += inv.totalSgst
+        existing.igst += inv.totalIgst
+        existing.cess += inv.totalCess
+        existing.totalTax += inv.totalTaxAmount
+        // Update receiver name if not set
+        if (!existing.receiverName && inv.receiverName) {
+          existing.receiverName = inv.receiverName
+        }
+      } else {
+        recipientMap.set(inv.gstin, {
+          gstin: inv.gstin,
+          receiverName: inv.receiverName,
+          invoiceCount: 1,
+          taxableValue: inv.totalTaxableValue,
+          cgst: inv.totalCgst,
+          sgst: inv.totalSgst,
+          igst: inv.totalIgst,
+          cess: inv.totalCess,
+          totalTax: inv.totalTaxAmount,
+        })
+      }
+    })
+
+    // Sort by taxable value descending
+    return Array.from(recipientMap.values()).sort((a, b) => b.taxableValue - a.taxableValue)
+  })()
 
   // Format currency for display
   const formatCurrency = (value: number) => {
@@ -112,7 +161,7 @@ export default function GSTDashboard() {
     status: "valid" as const,
   })), [b2bInvoices])
 
-  // Add error rows to table for display
+  // Add error rows to table for display (from friend's enhanced version with duplicate detection)
   const errorTableData = useMemo(() => errors.map((error, index) => {
     // Check if it's a duplicate error
     const isDuplicate = error.errors.some(msg =>
@@ -373,31 +422,13 @@ export default function GSTDashboard() {
                       cess: b2bInvoices.reduce((sum, inv) => sum + inv.totalCess, 0),
                       totalTax: totalTaxAmount,
                       grandTotal: totalTaxableValue + totalTaxAmount
-                    }
+                    },
+                    recipientSummary: recipientSummary
                   }}
                 />
               </TabsContent>
               <TabsContent value="errors" className="mt-6">
-                <InvoiceTable data={errorTableData} />
-                {errors.length > 0 && (
-                  <div className="mt-4 p-4 bg-destructive/5 rounded-lg border border-destructive/20">
-                    <h4 className="font-semibold text-destructive mb-2">Error Details:</h4>
-                    <ul className="space-y-2 text-sm">
-                      {errors.slice(0, 10).map((error, index) => (
-                        <li key={index} className="text-muted-foreground">
-                          {error.errors.map((err, errIndex) => (
-                            <div key={errIndex}>{err}</div>
-                          ))}
-                        </li>
-                      ))}
-                      {errors.length > 10 && (
-                        <li className="text-muted-foreground italic">
-                          ...and {errors.length - 10} more errors
-                        </li>
-                      )}
-                    </ul>
-                  </div>
-                )}
+                <ErrorDetails errors={errors} />
               </TabsContent>
             </Tabs>
           </div>

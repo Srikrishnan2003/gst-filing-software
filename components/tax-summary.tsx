@@ -2,7 +2,20 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { IndianRupee, FileText, TrendingUp } from "lucide-react"
+import { IndianRupee, FileText, TrendingUp, Users } from "lucide-react"
+
+// Recipient-based summary type
+interface RecipientSummary {
+    gstin: string
+    receiverName?: string
+    invoiceCount: number
+    taxableValue: number
+    cgst: number
+    sgst: number
+    igst: number
+    cess: number
+    totalTax: number
+}
 
 interface TaxSummaryProps {
     data: {
@@ -33,6 +46,8 @@ interface TaxSummaryProps {
             totalTax: number
             grandTotal: number
         }
+        // NEW: Recipient-based summary
+        recipientSummary?: RecipientSummary[]
     }
 }
 
@@ -173,6 +188,63 @@ export function TaxSummary({ data }: TaxSummaryProps) {
                     </Table>
                 </CardContent>
             </Card>
+
+            {/* Recipient-wise Summary (GSTIN-grouped) */}
+            {data.recipientSummary && data.recipientSummary.length > 0 && (
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                            <Users className="h-5 w-5" />
+                            Recipient-wise Tax Summary
+                            <span className="text-sm font-normal text-muted-foreground ml-2">
+                                (Grouped by GSTIN)
+                            </span>
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <Table>
+                            <TableHeader>
+                                <TableRow className="bg-muted/50">
+                                    <TableHead>GSTIN</TableHead>
+                                    <TableHead>Recipient Name</TableHead>
+                                    <TableHead className="text-right">Invoices</TableHead>
+                                    <TableHead className="text-right">Taxable Value (₹)</TableHead>
+                                    <TableHead className="text-right">IGST (₹)</TableHead>
+                                    <TableHead className="text-right">CGST (₹)</TableHead>
+                                    <TableHead className="text-right">SGST (₹)</TableHead>
+                                    <TableHead className="text-right">Total Tax (₹)</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {data.recipientSummary.map((recipient, i) => (
+                                    <TableRow key={recipient.gstin}>
+                                        <TableCell className="font-mono text-xs">{recipient.gstin}</TableCell>
+                                        <TableCell className="max-w-[150px] truncate" title={recipient.receiverName || '-'}>
+                                            {recipient.receiverName || '-'}
+                                        </TableCell>
+                                        <TableCell className="text-right">{recipient.invoiceCount}</TableCell>
+                                        <TableCell className="text-right">{formatCurrency(recipient.taxableValue)}</TableCell>
+                                        <TableCell className="text-right">{formatCurrency(recipient.igst)}</TableCell>
+                                        <TableCell className="text-right">{formatCurrency(recipient.cgst)}</TableCell>
+                                        <TableCell className="text-right">{formatCurrency(recipient.sgst)}</TableCell>
+                                        <TableCell className="text-right font-medium">{formatCurrency(recipient.totalTax)}</TableCell>
+                                    </TableRow>
+                                ))}
+                                {/* Totals Row */}
+                                <TableRow className="bg-muted/30 font-semibold border-t-2">
+                                    <TableCell colSpan={2}>Total ({data.recipientSummary.length} Recipients)</TableCell>
+                                    <TableCell className="text-right">{data.totals.invoices}</TableCell>
+                                    <TableCell className="text-right">{formatCurrency(data.totals.taxableValue)}</TableCell>
+                                    <TableCell className="text-right">{formatCurrency(data.totals.igst)}</TableCell>
+                                    <TableCell className="text-right">{formatCurrency(data.totals.cgst)}</TableCell>
+                                    <TableCell className="text-right">{formatCurrency(data.totals.sgst)}</TableCell>
+                                    <TableCell className="text-right text-primary">{formatCurrency(data.totals.totalTax)}</TableCell>
+                                </TableRow>
+                            </TableBody>
+                        </Table>
+                    </CardContent>
+                </Card>
+            )}
 
             {/* HSN Summary */}
             {data.hsn.length > 0 && (

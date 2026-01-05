@@ -12,28 +12,34 @@ export function ValidationBanner({ variant, title, description }: ValidationBann
   const config = {
     success: {
       icon: CheckCircle2,
-      className: "border-success/50 bg-success/5 text-success-foreground",
-      iconClassName: "text-success",
+      className: "border-green-500/50 bg-green-50 dark:bg-green-950/30",
+      iconClassName: "text-green-600 dark:text-green-400",
+      titleClassName: "text-green-800 dark:text-green-300",
+      descClassName: "text-green-700 dark:text-green-400",
     },
     warning: {
       icon: AlertTriangle,
-      className: "border-warning/50 bg-warning/5 text-warning-foreground",
-      iconClassName: "text-warning",
+      className: "border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/30",
+      iconClassName: "text-yellow-600 dark:text-yellow-400",
+      titleClassName: "text-yellow-800 dark:text-yellow-300",
+      descClassName: "text-yellow-700 dark:text-yellow-400",
     },
     error: {
       icon: AlertCircle,
-      className: "border-destructive/50 bg-destructive/5 text-destructive-foreground",
-      iconClassName: "text-destructive",
+      className: "border-red-500/50 bg-red-50 dark:bg-red-950/30",
+      iconClassName: "text-red-600 dark:text-red-400",
+      titleClassName: "text-red-800 dark:text-red-300",
+      descClassName: "text-red-700 dark:text-red-400",
     },
   }
 
-  const { icon: Icon, className, iconClassName } = config[variant]
+  const { icon: Icon, className, iconClassName, titleClassName, descClassName } = config[variant]
 
   return (
     <Alert className={cn("border-2", className)}>
       <Icon className={cn("h-5 w-5", iconClassName)} />
-      <AlertTitle className="font-semibold">{title}</AlertTitle>
-      {description && <AlertDescription>{description}</AlertDescription>}
+      <AlertTitle className={cn("font-semibold", titleClassName)}>{title}</AlertTitle>
+      {description && <AlertDescription className={descClassName}>{description}</AlertDescription>}
     </Alert>
   )
 }
