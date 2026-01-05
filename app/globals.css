@@ -163,3 +163,52 @@
     @apply bg-card/60 backdrop-blur-md border-white/20 dark:border-white/10 shadow-lg;
   }
 }
+
+/* Print Styles */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Hide everything except print content */
+  body > *:not(.print-container) {
+    display: none !important;
+  }
+
+  .print-summary {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    padding: 20px !important;
+    background: white !important;
+    color: black !important;
+  }
+
+  .print-summary table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  .print-summary th,
+  .print-summary td {
+    border: 1px solid #333 !important;
+    padding: 8px !important;
+  }
+
+  .print-summary th {
+    background-color: #f0f0f0 !important;
+    font-weight: bold !important;
+  }
+
+  /* Page break controls */
+  .print-summary h2 {
+    page-break-after: avoid;
+  }
+
+  .print-summary table {
+    page-break-inside: avoid;
+  }
+}

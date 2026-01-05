@@ -173,6 +173,7 @@ export function cleanB2BRow(row: Record<string, unknown>): Record<string, unknow
             case "invoiceNumber": cleaned[key] = String(value).trim(); break;
             case "receiverName": cleaned[key] = String(value).trim(); break;
             case "invoiceDate": cleaned[key] = excelDateToString(value as any); break;
+            case "hsnCode": cleaned[key] = String(value).trim(); break; // HSN code must be string
 
             case "placeOfSupply":
                 // Munim: "33-Tamil Nadu" -> "33"

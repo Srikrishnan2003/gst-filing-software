@@ -17,6 +17,7 @@ const TaxSummary = dynamic(() => import("@/components/tax-summary").then(mod => 
 })
 // ErrorDetails component (from your stashed changes)
 import { ErrorDetails } from "@/components/error-details"
+import { PrintButton } from "@/components/print-summary"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import {
@@ -401,6 +402,36 @@ export default function GSTDashboard() {
                 <InvoiceTable data={tableData} />
               </TabsContent>
               <TabsContent value="summary" className="mt-6">
+                {/* Print Button */}
+                <div className="flex justify-end mb-4">
+                  <PrintButton
+                    gstin={gstin}
+                    filingPeriod={filingPeriod}
+                    data={{
+                      b2b: {
+                        count: b2bInvoices.length,
+                        taxableValue: totalTaxableValue,
+                        cgst: totalCgst,
+                        sgst: totalSgst,
+                        igst: totalIgst,
+                        cess: b2bInvoices.reduce((sum, inv) => sum + inv.totalCess, 0),
+                        total: totalTaxableValue + totalTaxAmount
+                      },
+                      totals: {
+                        invoices: b2bInvoices.length,
+                        taxableValue: totalTaxableValue,
+                        cgst: totalCgst,
+                        sgst: totalSgst,
+                        igst: totalIgst,
+                        cess: b2bInvoices.reduce((sum, inv) => sum + inv.totalCess, 0),
+                        totalTax: totalTaxAmount,
+                        grandTotal: totalTaxableValue + totalTaxAmount
+                      },
+                      recipientSummary: recipientSummary
+                    }}
+                    disabled={b2bInvoices.length === 0}
+                  />
+                </div>
                 <TaxSummary
                   data={{
                     b2b: {

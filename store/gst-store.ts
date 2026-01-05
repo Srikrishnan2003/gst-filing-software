@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { type B2BInvoice, type ErrorRow, type ValidationSummary, type GSTR1B2BFormat } from "@/lib/schemas/gst-schema";
+import { type B2BInvoice, type B2BInvoiceRow, B2BInvoiceRowSchema, type ErrorRow, type ValidationSummary, type GSTR1B2BFormat } from "@/lib/schemas/gst-schema";
 import { type CDNRInvoice } from "@/lib/schemas/cdnr-schema";
 import { type ProcessingResult } from "@/lib/services/excel-processor";
 import { readJSONFile } from "@/lib/services/json-parser";
@@ -30,6 +30,10 @@ interface GSTStore {
     processFiles: () => Promise<void>;
     reset: () => void;
     downloadJSON: (gstin: string, filingPeriod: string) => void;
+
+    // Error editing actions
+    updateErrorRow: (index: number, data: Record<string, unknown>) => boolean;
+    removeError: (index: number) => void;
 }
 
 export const useGSTStore = create<GSTStore>((set, get) => ({
@@ -285,7 +289,83 @@ export const useGSTStore = create<GSTStore>((set, get) => ({
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-    }
+    },
+
+    // Update an error row with new data and attempt to validate
+    updateErrorRow: (index: number, data: Record<string, unknown>) => {
+        const { errors, b2bInvoices, validationSummary } = get();
+        if (index < 0 || index >= errors.length) return false;
+
+        // Validate with Zod
+        const result = B2BInvoiceRowSchema.safeParse(data);
+
+        if (result.success) {
+            // Create a new invoice from the valid data
+            const validData = result.data;
+            const newInvoice: B2BInvoice = {
+                id: `inv_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+                gstin: validData.gstin,
+                receiverName: validData.receiverName,
+                invoiceNumber: validData.invoiceNumber,
+                invoiceDate: validData.invoiceDate,
+                invoiceValue: validData.invoiceValue,
+                placeOfSupply: validData.placeOfSupply,
+                reverseCharge: validData.reverseCharge,
+                items: [{
+                    hsnCode: validData.hsnCode,
+                    description: validData.description,
+                    quantity: validData.quantity,
+                    unit: validData.unit,
+                    rate: validData.rate,
+                    taxableValue: validData.taxableValue,
+                    igstAmount: validData.igstAmount,
+                    cgstAmount: validData.cgstAmount,
+                    sgstAmount: validData.sgstAmount,
+                    cessAmount: validData.cessAmount,
+                }],
+                totalTaxableValue: validData.taxableValue,
+                totalIgst: validData.igstAmount,
+                totalCgst: validData.cgstAmount,
+                totalSgst: validData.sgstAmount,
+                totalCess: validData.cessAmount,
+                totalTaxAmount: validData.igstAmount + validData.cgstAmount + validData.sgstAmount + validData.cessAmount,
+            };
+
+            // Remove from errors and add to invoices
+            const newErrors = [...errors];
+            newErrors.splice(index, 1);
+
+            set({
+                errors: newErrors,
+                b2bInvoices: [...b2bInvoices, newInvoice],
+                validationSummary: {
+                    ...validationSummary,
+                    valid: validationSummary.valid + 1,
+                    error: validationSummary.error - 1,
+                },
+            });
+            return true;
+        }
+        return false;
+    },
+
+    // Remove an error row without validating (discard)
+    removeError: (index: number) => {
+        const { errors, validationSummary } = get();
+        if (index < 0 || index >= errors.length) return;
+
+        const newErrors = [...errors];
+        newErrors.splice(index, 1);
+
+        set({
+            errors: newErrors,
+            validationSummary: {
+                ...validationSummary,
+                total: validationSummary.total - 1,
+                error: validationSummary.error - 1,
+            },
+        });
+    },
 }));
 
 // Selector hooks
