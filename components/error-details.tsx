@@ -129,57 +129,56 @@ function SingleErrorRow({ error, index, onEdit }: { error: ErrorRow; index: numb
     return (
         <div className="border rounded-lg overflow-hidden bg-card">
             {/* Collapsed Header - High Level Error */}
-            <button
-                onClick={() => setIsExpanded(!isExpanded)}
-                className="w-full px-4 py-3 flex items-center gap-3 hover:bg-muted/50 transition-colors text-left"
-            >
-                {isExpanded ? (
-                    <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                ) : (
-                    <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                )}
+            <div className="w-full px-4 py-3 flex items-center gap-3 hover:bg-muted/50 transition-colors text-left">
+                <div
+                    onClick={() => setIsExpanded(!isExpanded)}
+                    className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
+                >
+                    {isExpanded ? (
+                        <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    ) : (
+                        <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    )}
 
-                <AlertCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
+                    <AlertCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
 
-                <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-medium text-sm">Row {error.rowNumber}</span>
-                        <span className="text-muted-foreground text-sm">•</span>
-                        <span className="text-sm text-muted-foreground truncate">
-                            Invoice: {String(invoiceNo).slice(0, 16)}
-                        </span>
-                        <span className="text-muted-foreground text-sm">•</span>
-                        <span className="text-sm text-muted-foreground font-mono truncate">
-                            {String(gstin).slice(0, 15)}
-                        </span>
+                    <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-medium text-sm">Row {error.rowNumber}</span>
+                            <span className="text-muted-foreground text-sm">•</span>
+                            <span className="text-sm text-muted-foreground truncate">
+                                Invoice: {String(invoiceNo).slice(0, 16)}
+                            </span>
+                            <span className="text-muted-foreground text-sm">•</span>
+                            <span className="text-sm text-muted-foreground font-mono truncate">
+                                {String(gstin).slice(0, 15)}
+                            </span>
+                        </div>
+                        <div className="text-sm text-red-600 dark:text-red-400 mt-0.5">
+                            {errorCount === 1 ? (
+                                <span>{getErrorInfo(firstError.message).title}</span>
+                            ) : (
+                                <span>{errorCount} validation errors found</span>
+                            )}
+                        </div>
                     </div>
-                    <div className="text-sm text-red-600 dark:text-red-400 mt-0.5">
-                        {errorCount === 1 ? (
-                            <span>{getErrorInfo(firstError.message).title}</span>
-                        ) : (
-                            <span>{errorCount} validation errors found</span>
-                        )}
-                    </div>
+
+                    <span className="text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 px-2 py-1 rounded-full flex-shrink-0">
+                        {errorCount} {errorCount === 1 ? "error" : "errors"}
+                    </span>
                 </div>
 
-                <span className="text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 px-2 py-1 rounded-full flex-shrink-0">
-                    {errorCount} {errorCount === 1 ? "error" : "errors"}
-                </span>
-
-                {/* Edit Button */}
+                {/* Edit Button - outside the clickable area */}
                 <Button
                     variant="outline"
                     size="sm"
-                    onClick={(e) => {
-                        e.stopPropagation()
-                        onEdit(index)
-                    }}
+                    onClick={() => onEdit(index)}
                     className="gap-1 flex-shrink-0"
                 >
                     <Pencil className="h-3 w-3" />
                     Edit
                 </Button>
-            </button>
+            </div>
 
             {/* Expanded Details */}
             {isExpanded && (

@@ -84,7 +84,7 @@ function getCellValue(cellValue: any): string | number | Date | null | boolean {
     return String(cellValue);
 }
 
-async function parseExcel(file: File, headerMappingDict: Record<string, string>): Promise<Record<string, unknown>[]> {
+async function parseExcel(file: File, headerMappingDict: Record<string, string>, type: 'B2B' | 'CDNR' = 'B2B'): Promise<Record<string, unknown>[]> {
     return new Promise((resolve, reject) => {
         // Enforce .xlsx or .csv extension
         const extension = file.name.split('.').pop()?.toLowerCase();
@@ -119,24 +119,39 @@ async function parseExcel(file: File, headerMappingDict: Record<string, string>)
                     }
                 }
 
-                // Smart Sheet Detection
-                const sheetPatterns = ['invoice', 'gstr1', 'b2b', 'sales', 'cdnr', 'credit', 'debit'];
-                let targetSheet: ExcelJS.Worksheet | undefined = workbook.worksheets[0];
+                // Type-specific Sheet Detection
+                // B2B looks for: b2b, gstr1, invoice, sales (but NOT cdnr/credit/debit)
+                // CDNR looks for: cdnr, credit, debit, note
+                const b2bPatterns = ['b2b', 'gstr1', 'invoice', 'sales'];
+                const cdnrPatterns = ['cdnr', 'credit', 'debit', 'note'];
+                const targetPatterns = type === 'CDNR' ? cdnrPatterns : b2bPatterns;
+                const excludePatterns = type === 'CDNR' ? b2bPatterns : cdnrPatterns;
 
+                let targetSheet: ExcelJS.Worksheet | undefined = undefined;
+
+                // First try to find exact match for the type
                 for (const sheet of workbook.worksheets) {
                     const lowerName = sheet.name.toLowerCase();
-                    if (sheetPatterns.some(pattern => lowerName.includes(pattern))) {
+                    // Check if sheet matches target patterns
+                    const matchesTarget = targetPatterns.some(pattern => lowerName.includes(pattern));
+                    // Check if sheet matches patterns we should exclude
+                    const matchesExclude = excludePatterns.some(pattern => lowerName.includes(pattern));
+
+                    if (matchesTarget && !matchesExclude) {
                         targetSheet = sheet;
                         break;
                     }
                 }
 
+                // If no type-specific sheet found, return empty array (no data for this type)
                 if (!targetSheet) {
-                    reject(new Error("No valid sheet found"));
+                    console.log(`No ${type} sheet found in file "${file.name}"`);
+                    resolve([]); // Return empty - no data for this type
                     return;
                 }
 
-                console.log(`Using sheet: "${targetSheet.name}"`);
+                console.log(`Using sheet: "${targetSheet.name}" for ${type}`);
+
 
                 // Convert worksheet to array of arrays for header detection
                 // We only scan the first 20 rows to find the header
@@ -291,7 +306,17 @@ async function parseExcel(file: File, headerMappingDict: Record<string, string>)
 
 export async function processExcelFile(file: File, type: 'B2B' | 'CDNR' = 'B2B', externalSeenSet?: Set<string>): Promise<ProcessingResult> {
     const processor = type === 'CDNR' ? CDNR_PROCESSOR : B2B_PROCESSOR;
-    const rawRows = await parseExcel(file, processor.HEADER_MAPPINGS);
+    const rawRows = await parseExcel(file, processor.HEADER_MAPPINGS, type);
+
+    // If no rows found (sheet doesn't exist for this type), return empty result
+    if (rawRows.length === 0) {
+        return {
+            invoices: [],
+            errors: [],
+            summary: { total: 0, valid: 0, error: 0 },
+        };
+    }
+
     // @ts-ignore
     const { validRows, errorRows } = processor.validate(rawRows, externalSeenSet);
     // @ts-ignore 

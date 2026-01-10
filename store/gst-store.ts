@@ -3,6 +3,7 @@ import { type B2BInvoice, type B2BInvoiceRow, B2BInvoiceRowSchema, type ErrorRow
 import { type CDNRInvoice } from "@/lib/schemas/cdnr-schema";
 import { type ProcessingResult } from "@/lib/services/excel-processor";
 import { readJSONFile } from "@/lib/services/json-parser";
+import { getHSNDescription } from "@/lib/data/hsn-master";
 
 interface GSTStore {
     // Step management
@@ -19,10 +20,15 @@ interface GSTStore {
     returnType: 'B2B' | 'CDNR'; // To toggle between modes
     setReturnType: (type: 'B2B' | 'CDNR') => void;
 
+    // Invoice data (separate for each type)
     b2bInvoices: B2BInvoice[];
     cdnrInvoices: CDNRInvoice[];
-    errors: ErrorRow[];
-    validationSummary: ValidationSummary;
+
+    // Errors and summaries (separate for each type)
+    b2bErrors: ErrorRow[];
+    cdnrErrors: ErrorRow[];
+    b2bSummary: ValidationSummary;
+    cdnrSummary: ValidationSummary;
 
     // Actions
     addFiles: (files: File[]) => void;
@@ -43,10 +49,14 @@ export const useGSTStore = create<GSTStore>((set, get) => ({
     isProcessing: false,
     processingError: null,
     returnType: 'B2B', // Default to B2B
-    validationSummary: { total: 0, valid: 0, error: 0 },
+
+    // Separate state for each type
     b2bInvoices: [],
     cdnrInvoices: [],
-    errors: [],
+    b2bErrors: [],
+    cdnrErrors: [],
+    b2bSummary: { total: 0, valid: 0, error: 0 },
+    cdnrSummary: { total: 0, valid: 0, error: 0 },
 
     setStep: (step) => set({ currentStep: step }),
 
@@ -68,7 +78,7 @@ export const useGSTStore = create<GSTStore>((set, get) => ({
     },
 
     processFiles: async () => {
-        const { rawFiles, returnType } = get();
+        const { rawFiles } = get();
         if (rawFiles.length === 0) return;
 
         set({ isProcessing: true, processingError: null });
@@ -76,37 +86,75 @@ export const useGSTStore = create<GSTStore>((set, get) => ({
         try {
             const { processExcelFile } = await import("@/lib/services/excel-processor");
 
-            // Accumulators
+            // Separate accumulators for B2B and CDNR
             let allB2B: B2BInvoice[] = [];
             let allCDNR: CDNRInvoice[] = [];
-            let allErrors: ErrorRow[] = [];
-            let totalSummary = { total: 0, valid: 0, error: 0 };
-            const globalSeenSet = new Set<string>();
+            let b2bErrors: ErrorRow[] = [];
+            let cdnrErrors: ErrorRow[] = [];
+            let b2bSummary = { total: 0, valid: 0, error: 0 };
+            let cdnrSummary = { total: 0, valid: 0, error: 0 };
+            const globalB2BSeenSet = new Set<string>();
+            const globalCDNRSeenSet = new Set<string>();
 
-            // Process all files
+            // Process all files for BOTH B2B and CDNR
             for (const file of rawFiles) {
-                const result = await processExcelFile(file, returnType, globalSeenSet);
-                if (returnType === 'B2B') {
-                    // We need to merge invoices carefully. 
-                    // ideally we should flatten them all then run 'group' again, but processExcelFile returns grouped invoices.
-                    // Simple Concat for now. Collisions within files handled by processor. Collisions across files not handled yet (acceptable MVP).
-                    allB2B = [...allB2B, ...(result.invoices as B2BInvoice[])];
-                } else {
-                    allCDNR = [...allCDNR, ...(result.invoices as CDNRInvoice[])];
-                }
+                const fileExtension = file.name.split('.').pop()?.toLowerCase();
 
-                // Merge Errors & Summary
-                allErrors = [...allErrors, ...result.errors];
-                totalSummary.total += result.summary.total;
-                totalSummary.valid += result.summary.valid;
-                totalSummary.error += result.summary.error;
+                if (fileExtension === 'json') {
+                    // Handle JSON files - only B2B supported in JSON
+                    try {
+                        const jsonResult = await readJSONFile(file);
+                        allB2B = [...allB2B, ...jsonResult.b2bInvoices];
+                        b2bSummary.total += jsonResult.b2bInvoices.length;
+                        b2bSummary.valid += jsonResult.b2bInvoices.length;
+                    } catch (jsonError) {
+                        console.error("JSON parsing error:", jsonError);
+                        b2bErrors.push({
+                            rowNumber: 0,
+                            data: { fileName: file.name },
+                            errors: [`Failed to parse JSON file: ${jsonError instanceof Error ? jsonError.message : 'Unknown error'}`]
+                        });
+                        b2bSummary.total += 1;
+                        b2bSummary.error += 1;
+                    }
+                } else {
+                    // Handle Excel/CSV files - process BOTH B2B and CDNR
+
+                    // Process B2B sheet
+                    try {
+                        const b2bResult = await processExcelFile(file, 'B2B', globalB2BSeenSet);
+                        allB2B = [...allB2B, ...(b2bResult.invoices as B2BInvoice[])];
+                        b2bErrors = [...b2bErrors, ...b2bResult.errors];
+                        b2bSummary.total += b2bResult.summary.total;
+                        b2bSummary.valid += b2bResult.summary.valid;
+                        b2bSummary.error += b2bResult.summary.error;
+                    } catch (b2bError) {
+                        console.error("B2B processing error:", b2bError);
+                        // Don't add error for missing B2B sheet - it's optional
+                    }
+
+                    // Process CDNR sheet
+                    try {
+                        const cdnrResult = await processExcelFile(file, 'CDNR', globalCDNRSeenSet);
+                        allCDNR = [...allCDNR, ...(cdnrResult.invoices as CDNRInvoice[])];
+                        cdnrErrors = [...cdnrErrors, ...cdnrResult.errors];
+                        cdnrSummary.total += cdnrResult.summary.total;
+                        cdnrSummary.valid += cdnrResult.summary.valid;
+                        cdnrSummary.error += cdnrResult.summary.error;
+                    } catch (cdnrError) {
+                        console.error("CDNR processing error:", cdnrError);
+                        // Don't add error for missing CDNR sheet - it's optional
+                    }
+                }
             }
 
             set({
                 b2bInvoices: allB2B,
                 cdnrInvoices: allCDNR,
-                errors: allErrors,
-                validationSummary: totalSummary,
+                b2bErrors,
+                cdnrErrors,
+                b2bSummary,
+                cdnrSummary,
                 isProcessing: false,
                 currentStep: 2 // Move to dashboard
             });
@@ -126,10 +174,12 @@ export const useGSTStore = create<GSTStore>((set, get) => ({
             rawFiles: [],
             isProcessing: false,
             processingError: null,
-            validationSummary: { total: 0, valid: 0, error: 0 },
             b2bInvoices: [],
             cdnrInvoices: [],
-            errors: [],
+            b2bErrors: [],
+            cdnrErrors: [],
+            b2bSummary: { total: 0, valid: 0, error: 0 },
+            cdnrSummary: { total: 0, valid: 0, error: 0 },
         });
     },
 
@@ -144,66 +194,115 @@ export const useGSTStore = create<GSTStore>((set, get) => ({
     downloadJSON: (gstin: string, filingPeriod: string) => {
         const { b2bInvoices, cdnrInvoices, returnType } = get();
 
-        // Base structure
+        // Helper function to build tax detail object, omitting zero-value fields
+        const buildTaxDetails = (item: { rate: number; taxableValue: number; igstAmount: number; cgstAmount: number; sgstAmount: number; cessAmount: number }) => {
+            const itm_det: any = {
+                csamt: item.cessAmount, // Always include cess (usually 0)
+                rt: item.rate,
+                txval: item.taxableValue,
+            };
+
+            // Only include non-zero tax amounts (GST portal convention)
+            if (item.igstAmount > 0) {
+                itm_det.iamt = item.igstAmount;
+            }
+            if (item.cgstAmount > 0) {
+                itm_det.camt = item.cgstAmount;
+            }
+            if (item.sgstAmount > 0) {
+                itm_det.samt = item.sgstAmount;
+            }
+
+            return itm_det;
+        };
+
+        // Helper function to get rate-based item number (GST portal convention)
+        // Format: {rate * 100} + 1, e.g., 18% = 1801, 5% = 501
+        const getRateBasedItemNum = (rate: number): number => {
+            return Math.round(rate * 100) + 1;
+        };
+
+        // Base structure with required root fields
         const gstr1: any = {
             gstin: gstin.toUpperCase(),
             fp: filingPeriod,
+            filing_typ: "M",  // Monthly filing
+            gt: 0.0,          // Gross turnover (float)
+            cur_gt: 0.0,      // Current gross turnover (float)
         };
 
         if (returnType === 'B2B' && b2bInvoices.length > 0) {
+            // Sort invoices by invoice number first
+            const sortedInvoices = [...b2bInvoices].sort((a, b) =>
+                a.invoiceNumber.localeCompare(b.invoiceNumber, undefined, { numeric: true })
+            );
+
             // 1. Group by CTIN (Customer GSTIN)
             const b2bMap = new Map<string, any>();
-            b2bInvoices.forEach(inv => {
+            sortedInvoices.forEach(inv => {
                 const ctin = inv.gstin;
                 if (!b2bMap.has(ctin)) {
-                    b2bMap.set(ctin, { ctin, cfs: "N", inv: [] }); // Added cfs field
+                    b2bMap.set(ctin, { ctin, cfs: "N", inv: [] });
                 }
                 const party = b2bMap.get(ctin);
 
-                party.inv.push({
-                    inum: inv.invoiceNumber,
-                    idt: inv.invoiceDate,
-                    val: inv.invoiceValue,
-                    pos: inv.placeOfSupply,
-                    rchrg: inv.reverseCharge,
-                    inv_typ: "R", // Hardcoded Regular
-                    itms: inv.items.map((item, idx) => ({
-                        num: idx + 1,
-                        itm_det: {
-                            rt: item.rate,
-                            txval: item.taxableValue,
-                            iamt: item.igstAmount,
-                            camt: item.cgstAmount,
-                            samt: item.sgstAmount,
-                            csamt: item.cessAmount
-                        }
-                    }))
+                // Build item details with rate-based num and omit zero-value tax fields
+                const itms = inv.items.map((item) => {
+                    return {
+                        num: getRateBasedItemNum(item.rate), // Use rate-based number (e.g., 1801 for 18%)
+                        itm_det: buildTaxDetails(item)
+                    };
                 });
+
+                // Build invoice object with GST portal metadata fields
+                const invoiceObj: any = {
+                    itms,
+                    val: inv.invoiceValue,
+                    inv_typ: "R",
+                    flag: "U",           // Upload flag - required by portal
+                    pos: inv.placeOfSupply,
+                    updby: "S",          // Updated by System
+                    idt: inv.invoiceDate,
+                    rchrg: inv.reverseCharge,
+                    inum: inv.invoiceNumber,
+                    cflag: "N",          // Correction flag
+                };
+
+                party.inv.push(invoiceObj);
             });
-            gstr1.b2b = Array.from(b2bMap.values());
+
+            // Sort CTIN groups by CTIN
+            const b2bArray = Array.from(b2bMap.values())
+                .sort((a, b) => a.ctin.localeCompare(b.ctin));
+
+            gstr1.b2b = b2bArray;
 
             // 2. HSN Summary Generation
             const hsnMap = new Map<string, any>();
             b2bInvoices.forEach(inv => {
                 inv.items.forEach(item => {
-                    // Key: HSN + Rate + Unit (to ensure unique groups)
-                    const key = `${item.hsnCode || 'NA'}_${item.rate}_${item.unit || 'OTH'}`;
+                    // Key: HSN + Rate (to ensure unique groups)
+                    const key = `${item.hsnCode || 'NA'}_${item.rate}`;
 
                     if (!hsnMap.has(key)) {
                         hsnMap.set(key, {
                             num: 0, // Assigned later
                             hsn_sc: item.hsnCode || "NA",
-                            desc: item.description || "Goods",
-                            uqc: (item.unit || "OTH").substring(0, 3).toUpperCase(), // Limit to 3 chars roughly
+                            desc: getHSNDescription(item.hsnCode),
+                            uqc: "NA",
                             qty: 0,
-                            val: 0, // Optional
                             txval: 0,
                             iamt: 0, camt: 0, samt: 0, csamt: 0,
                             rt: item.rate
                         });
                     }
                     const hsnEntry = hsnMap.get(key);
-                    hsnEntry.qty += (item.quantity || 0);
+                    // Only add quantity for Products (HSN not starting with 99)
+                    // Services (HSN starting with 99) should have qty = 0
+                    const isService = (item.hsnCode || "").startsWith("99");
+                    if (!isService) {
+                        hsnEntry.qty += (item.quantity || 0);
+                    }
                     hsnEntry.txval += item.taxableValue;
                     hsnEntry.iamt += item.igstAmount;
                     hsnEntry.camt += item.cgstAmount;
@@ -212,35 +311,59 @@ export const useGSTStore = create<GSTStore>((set, get) => ({
                 });
             });
 
+            // Build HSN entries, omitting zero-value tax fields
+            const hsnEntries = Array.from(hsnMap.values()).map((h, i) => {
+                const entry: any = {
+                    csamt: h.csamt,
+                    rt: h.rt,
+                    uqc: h.uqc,
+                    num: i + 1,
+                    txval: h.txval,
+                    qty: 0, // GST portal uses 0 for qty
+                    hsn_sc: h.hsn_sc,
+                    desc: h.desc,
+                };
+
+                // Only include non-zero tax amounts
+                if (h.iamt > 0) entry.iamt = h.iamt;
+                if (h.camt > 0) entry.camt = h.camt;
+                if (h.samt > 0) entry.samt = h.samt;
+
+                return entry;
+            });
+
             gstr1.hsn = {
                 flag: "N",
-                hsn_b2b: Array.from(hsnMap.values()).map((h, i) => ({ ...h, num: i + 1 }))
+                hsn_b2b: hsnEntries,
+                hsn_b2c: [], // Empty array required by GST portal
             };
 
-            // 3. Doc Issue Summary (Simplified: Assumes one contiguous series)
+            // 3. Doc Issue Summary
             if (b2bInvoices.length > 0) {
-                // Sort invoices by ID or Number string comparison is tricky, but we try
-                // Assuming alphanumeric like "INV-001"
-                const sortedInvoices = [...b2bInvoices].sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber));
-                const fromInv = sortedInvoices[0].invoiceNumber;
-                const toInv = sortedInvoices[sortedInvoices.length - 1].invoiceNumber;
+                const sortedForDoc = [...b2bInvoices].sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber));
+                const fromInv = sortedForDoc[0].invoiceNumber;
+                const toInv = sortedForDoc[sortedForDoc.length - 1].invoiceNumber;
                 const count = b2bInvoices.length;
 
                 gstr1.doc_issue = {
                     flag: "N",
                     doc_det: [{
-                        doc_num: 1, // Series 1
                         docs: [{
+                            cancel: 0,
                             num: 1,
+                            totnum: count,
                             from: fromInv,
                             to: toInv,
-                            totnum: count,
-                            cancel: 0, // No cancellation logic yet
                             net_issue: count
-                        }]
+                        }],
+                        doc_num: 1
                     }]
                 };
             }
+
+            // Add filing date (required by portal)
+            const today = new Date();
+            gstr1.fil_dt = `${String(today.getDate()).padStart(2, '0')}-${String(today.getMonth() + 1).padStart(2, '0')}-${today.getFullYear()}`;
         }
 
         if (returnType === 'CDNR' && cdnrInvoices.length > 0) {
@@ -251,6 +374,13 @@ export const useGSTStore = create<GSTStore>((set, get) => ({
                     cdnrMap.set(ctin, { ctin, nt: [] });
                 }
                 const party = cdnrMap.get(ctin);
+
+                // Build item details with rate-based num and omit zero-value tax fields
+                const itms = note.items.map((item) => ({
+                    num: getRateBasedItemNum(item.rate),
+                    itm_det: buildTaxDetails(item)
+                }));
+
                 party.nt.push({
                     nty: note.noteType,
                     nt_num: note.noteNumber,
@@ -259,24 +389,10 @@ export const useGSTStore = create<GSTStore>((set, get) => ({
                     idt: note.originalInvoiceDate,
                     val: note.noteValue,
                     p_gst: note.preGst,
-                    // inv_typ might be needed here too for older schemas but CDNR usually is separate
-                    itms: note.items.map((item, idx) => ({
-                        num: idx + 1,
-                        itm_det: {
-                            rt: item.rate,
-                            txval: item.taxableValue,
-                            iamt: item.igstAmount,
-                            camt: item.cgstAmount,
-                            samt: item.sgstAmount,
-                            csamt: item.cessAmount
-                        }
-                    }))
+                    itms
                 });
             });
             gstr1.cdnr = Array.from(cdnrMap.values());
-
-            // Note: HSN/Doc Issue not strictly required for CDNR-only files usually, 
-            // but if desired, similar logic applies. Keeping it for B2B only for now.
         }
 
         const dataStr = JSON.stringify(gstr1, null, 2);
@@ -285,7 +401,7 @@ export const useGSTStore = create<GSTStore>((set, get) => ({
 
         const link = document.createElement("a");
         link.href = url;
-        link.download = `GSTR1_${gstin}_${filingPeriod}_${returnType}.json`; // appended returnType to filename
+        link.download = `GSTR1_${gstin}_${filingPeriod}_${returnType}.json`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -293,8 +409,10 @@ export const useGSTStore = create<GSTStore>((set, get) => ({
 
     // Update an error row with new data and attempt to validate
     updateErrorRow: (index: number, data: Record<string, unknown>) => {
-        const { errors, b2bInvoices, validationSummary } = get();
-        if (index < 0 || index >= errors.length) return false;
+        const { b2bErrors, b2bInvoices, b2bSummary, returnType } = get();
+        // Currently only supports B2B error editing
+        if (returnType !== 'B2B') return false;
+        if (index < 0 || index >= b2bErrors.length) return false;
 
         // Validate with Zod
         const result = B2BInvoiceRowSchema.safeParse(data);
@@ -332,16 +450,16 @@ export const useGSTStore = create<GSTStore>((set, get) => ({
             };
 
             // Remove from errors and add to invoices
-            const newErrors = [...errors];
+            const newErrors = [...b2bErrors];
             newErrors.splice(index, 1);
 
             set({
-                errors: newErrors,
+                b2bErrors: newErrors,
                 b2bInvoices: [...b2bInvoices, newInvoice],
-                validationSummary: {
-                    ...validationSummary,
-                    valid: validationSummary.valid + 1,
-                    error: validationSummary.error - 1,
+                b2bSummary: {
+                    ...b2bSummary,
+                    valid: b2bSummary.valid + 1,
+                    error: b2bSummary.error - 1,
                 },
             });
             return true;
@@ -351,20 +469,33 @@ export const useGSTStore = create<GSTStore>((set, get) => ({
 
     // Remove an error row without validating (discard)
     removeError: (index: number) => {
-        const { errors, validationSummary } = get();
-        if (index < 0 || index >= errors.length) return;
+        const { b2bErrors, cdnrErrors, b2bSummary, cdnrSummary, returnType } = get();
 
-        const newErrors = [...errors];
-        newErrors.splice(index, 1);
-
-        set({
-            errors: newErrors,
-            validationSummary: {
-                ...validationSummary,
-                total: validationSummary.total - 1,
-                error: validationSummary.error - 1,
-            },
-        });
+        if (returnType === 'B2B') {
+            if (index < 0 || index >= b2bErrors.length) return;
+            const newErrors = [...b2bErrors];
+            newErrors.splice(index, 1);
+            set({
+                b2bErrors: newErrors,
+                b2bSummary: {
+                    ...b2bSummary,
+                    total: b2bSummary.total - 1,
+                    error: b2bSummary.error - 1,
+                },
+            });
+        } else {
+            if (index < 0 || index >= cdnrErrors.length) return;
+            const newErrors = [...cdnrErrors];
+            newErrors.splice(index, 1);
+            set({
+                cdnrErrors: newErrors,
+                cdnrSummary: {
+                    ...cdnrSummary,
+                    total: cdnrSummary.total - 1,
+                    error: cdnrSummary.error - 1,
+                },
+            });
+        }
     },
 }));
 
@@ -374,8 +505,19 @@ export const useRawFiles = () => useGSTStore((state) => state.rawFiles);
 export const useIsProcessing = () => useGSTStore((state) => state.isProcessing);
 export const useProcessingError = () => useGSTStore((state) => state.processingError);
 export const useReturnType = () => useGSTStore((state) => state.returnType);
-export const useValidationSummary = () => useGSTStore((state) => state.validationSummary);
+
+// Mode-aware selectors - return data based on current returnType
+export const useValidationSummary = () => useGSTStore((state) =>
+    state.returnType === 'B2B' ? state.b2bSummary : state.cdnrSummary
+);
 export const useB2BInvoices = () => useGSTStore((state) => state.b2bInvoices);
 export const useCDNRInvoices = () => useGSTStore((state) => state.cdnrInvoices);
-export const useErrors = () => useGSTStore((state) => state.errors);
+export const useErrors = () => useGSTStore((state) =>
+    state.returnType === 'B2B' ? state.b2bErrors : state.cdnrErrors
+);
+
+// Get invoices based on current mode
+export const useCurrentInvoices = () => useGSTStore((state) =>
+    state.returnType === 'B2B' ? state.b2bInvoices : state.cdnrInvoices
+);
 

@@ -2,12 +2,15 @@
 
 import { useState, useMemo } from "react"
 import dynamic from "next/dynamic"
-import { FileText, IndianRupee, AlertCircle, TrendingUp, Download, RotateCcw, Loader2, Briefcase, Undo2 } from "lucide-react"
+import { FileText, IndianRupee, AlertCircle, TrendingUp, Download, RotateCcw, Loader2, Briefcase, Undo2, FileSpreadsheet } from "lucide-react"
 import { DashboardShell } from "@/components/dashboard-shell"
 import { ProcessStepper } from "@/components/process-stepper"
 import { FileDropzone } from "@/components/file-dropzone"
 import { MetricCard } from "@/components/metric-card"
 import { ValidationBanner } from "@/components/validation-banner"
+import { InvoiceFilter, applyInvoiceFilters, defaultFilters, type InvoiceFilters } from "@/components/invoice-filter"
+import { exportFilteredToExcel } from "@/lib/services/excel-export"
+import { exportToGSTOfflineTool } from "@/lib/services/gst-offline-export"
 // Lazy load heavy components (from friend's changes)
 const InvoiceTable = dynamic(() => import("@/components/invoice-table").then(mod => mod.InvoiceTable), {
   loading: () => <div className="h-64 bg-muted/20 animate-pulse rounded-lg" />
@@ -18,11 +21,13 @@ const TaxSummary = dynamic(() => import("@/components/tax-summary").then(mod => 
 // ErrorDetails component (from your stashed changes)
 import { ErrorDetails } from "@/components/error-details"
 import { PrintButton } from "@/components/print-summary"
+import { JsonComparator } from "@/components/json-comparator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import {
   useGSTStore,
   useCurrentStep,
+  useCurrentInvoices,
   useB2BInvoices,
   useErrors,
   useValidationSummary,
@@ -33,9 +38,10 @@ import {
 
 export default function GSTDashboard() {
   const currentStep = useCurrentStep()
-  const b2bInvoices = useB2BInvoices()
-  const errors = useErrors()
-  const validationSummary = useValidationSummary()
+  const currentInvoices = useCurrentInvoices() // Mode-aware invoices
+  const b2bInvoices = useB2BInvoices() // For B2B-specific operations
+  const errors = useErrors() // Now mode-aware
+  const validationSummary = useValidationSummary() // Now mode-aware
   const isProcessing = useIsProcessing()
   const processingError = useProcessingError()
 
@@ -53,6 +59,28 @@ export default function GSTDashboard() {
   const [showDownloadModal, setShowDownloadModal] = useState(false)
   const [gstin, setGstin] = useState("")
   const [filingPeriod, setFilingPeriod] = useState("")
+
+  // Filter state
+  const [filters, setFilters] = useState<InvoiceFilters>(defaultFilters)
+
+  // Apply filters to invoices (B2B only - CDNR has different structure)
+  // Filter/export features only available in B2B mode
+  const filteredInvoices = useMemo(() => {
+    if (returnType !== 'B2B') return []
+    return applyInvoiceFilters(b2bInvoices, filters)
+  }, [b2bInvoices, filters, returnType])
+
+  // Handle Excel export (only for B2B mode - CDNR would need different format)
+  const handleExportExcel = async () => {
+    if (returnType !== 'B2B') {
+      alert('Excel export is currently only supported for B2B invoices')
+      return
+    }
+    const filterDesc = filters.searchQuery ||
+      (filters.dateFrom ? `From_${filters.dateFrom}` : '') ||
+      (filters.gstRate !== 'all' ? `Rate_${filters.gstRate}` : '')
+    await exportFilteredToExcel(filteredInvoices, filterDesc || undefined)
+  }
 
   // Auto-detect GSTIN and filing period from invoices when modal opens
   const openDownloadModal = () => {
@@ -94,6 +122,63 @@ export default function GSTDashboard() {
       totalIgst: b2bInvoices.reduce((sum, inv) => sum + inv.totalIgst, 0)
     }
   }, [b2bInvoices])
+
+  // Calculate filtered totals for summary/print (based on filtered invoices)
+  const filteredTotals = useMemo(() => {
+    return {
+      taxableValue: filteredInvoices.reduce((sum, inv) => sum + inv.totalTaxableValue, 0),
+      taxAmount: filteredInvoices.reduce((sum, inv) => sum + inv.totalTaxAmount, 0),
+      cgst: filteredInvoices.reduce((sum, inv) => sum + inv.totalCgst, 0),
+      sgst: filteredInvoices.reduce((sum, inv) => sum + inv.totalSgst, 0),
+      igst: filteredInvoices.reduce((sum, inv) => sum + inv.totalIgst, 0),
+      cess: filteredInvoices.reduce((sum, inv) => sum + inv.totalCess, 0)
+    }
+  }, [filteredInvoices])
+
+  // Calculate filtered recipient summary
+  const filteredRecipientSummary = useMemo(() => {
+    const recipientMap = new Map<string, {
+      gstin: string
+      receiverName?: string
+      invoiceCount: number
+      taxableValue: number
+      cgst: number
+      sgst: number
+      igst: number
+      cess: number
+      totalTax: number
+    }>()
+
+    filteredInvoices.forEach(inv => {
+      const existing = recipientMap.get(inv.gstin)
+      if (existing) {
+        existing.invoiceCount += 1
+        existing.taxableValue += inv.totalTaxableValue
+        existing.cgst += inv.totalCgst
+        existing.sgst += inv.totalSgst
+        existing.igst += inv.totalIgst
+        existing.cess += inv.totalCess
+        existing.totalTax += inv.totalTaxAmount
+        if (!existing.receiverName && inv.receiverName) {
+          existing.receiverName = inv.receiverName
+        }
+      } else {
+        recipientMap.set(inv.gstin, {
+          gstin: inv.gstin,
+          receiverName: inv.receiverName,
+          invoiceCount: 1,
+          taxableValue: inv.totalTaxableValue,
+          cgst: inv.totalCgst,
+          sgst: inv.totalSgst,
+          igst: inv.totalIgst,
+          cess: inv.totalCess,
+          totalTax: inv.totalTaxAmount,
+        })
+      }
+    })
+
+    return Array.from(recipientMap.values()).sort((a, b) => b.taxableValue - a.taxableValue)
+  }, [filteredInvoices])
 
   // Calculate recipient-based summary (grouped by GSTIN)
   const recipientSummary = (() => {
@@ -341,8 +426,8 @@ export default function GSTDashboard() {
             {/* Metric Cards Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <MetricCard
-                title="Total Invoices"
-                value={String(b2bInvoices.length)}
+                title={returnType === 'B2B' ? 'Total Invoices' : 'Total Notes'}
+                value={String(validationSummary.valid)}
                 icon={FileText}
                 description={`Valid: ${validationSummary.valid} | Errors: ${validationSummary.error}`}
               />
@@ -366,12 +451,18 @@ export default function GSTDashboard() {
                 title="Taxable Amount"
                 value={formatCurrency(totalTaxableValue)}
                 icon={TrendingUp}
-                description={`${b2bInvoices.length} grouped invoices`}
+                description={`${validationSummary.valid} grouped ${returnType === 'B2B' ? 'invoices' : 'notes'}`}
               />
             </div>
 
             {/* Validation Banner */}
-            {hasErrors ? (
+            {validationSummary.total === 0 ? (
+              <ValidationBanner
+                variant="warning"
+                title={`No ${returnType === 'B2B' ? 'B2B Invoices' : 'CDNR Notes'} Found`}
+                description={`The uploaded file does not contain ${returnType === 'B2B' ? 'B2B invoice' : 'CDNR'} data. Please check the correct sheet in your Excel file.`}
+              />
+            ) : hasErrors ? (
               <ValidationBanner
                 variant="error"
                 title={`${errors.length} Validation Error${errors.length > 1 ? "s" : ""} Found`}
@@ -387,9 +478,9 @@ export default function GSTDashboard() {
 
             {/* Tabs with Invoice Tables and Summary */}
             <Tabs defaultValue="valid" className="w-full">
-              <TabsList className="grid w-full md:max-w-lg grid-cols-3 h-auto">
+              <TabsList className="grid w-full md:max-w-2xl grid-cols-4 h-auto">
                 <TabsTrigger value="valid">
-                  Invoices ({b2bInvoices.length})
+                  {returnType === 'B2B' ? 'Invoices' : 'Notes'} ({validationSummary.valid})
                 </TabsTrigger>
                 <TabsTrigger value="summary">
                   Summary
@@ -397,11 +488,56 @@ export default function GSTDashboard() {
                 <TabsTrigger value="errors" disabled={!hasErrors}>
                   Errors ({errors.length})
                 </TabsTrigger>
+                <TabsTrigger value="testing">
+                  🧪 Testing
+                </TabsTrigger>
               </TabsList>
-              <TabsContent value="valid" className="mt-6">
-                <InvoiceTable data={tableData} />
+              <TabsContent value="valid" className="mt-6 space-y-4">
+                {/* Filter Section */}
+                <InvoiceFilter
+                  filters={filters}
+                  onFiltersChange={setFilters}
+                  onClearFilters={() => setFilters(defaultFilters)}
+                  resultCount={filteredInvoices.length}
+                  totalCount={b2bInvoices.length}
+                />
+
+                {/* Action Buttons */}
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleExportExcel}
+                    disabled={filteredInvoices.length === 0}
+                    className="gap-2"
+                  >
+                    <FileSpreadsheet className="h-4 w-4" />
+                    Export to Excel ({filteredInvoices.length})
+                  </Button>
+                </div>
+
+                {/* Invoice Table with filtered data */}
+                <InvoiceTable data={filteredInvoices.map(inv => ({
+                  id: inv.id,
+                  invoiceNo: inv.invoiceNumber,
+                  date: inv.invoiceDate,
+                  party: inv.receiverName || "-",
+                  gstin: inv.gstin,
+                  amount: inv.totalTaxableValue,
+                  taxAmount: inv.totalTaxAmount,
+                  status: "valid" as const,
+                  hsnCode: inv.items[0]?.hsnCode,
+                  hsnDescription: inv.items[0]?.description
+                }))} />
               </TabsContent>
               <TabsContent value="summary" className="mt-6">
+                {/* Filter Notice */}
+                {filteredInvoices.length !== b2bInvoices.length && (
+                  <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800 text-sm text-blue-700 dark:text-blue-300">
+                    Showing summary for <strong>{filteredInvoices.length}</strong> filtered invoices (out of {b2bInvoices.length} total)
+                  </div>
+                )}
+
                 {/* Print Button */}
                 <div className="flex justify-end mb-4">
                   <PrintButton
@@ -409,57 +545,60 @@ export default function GSTDashboard() {
                     filingPeriod={filingPeriod}
                     data={{
                       b2b: {
-                        count: b2bInvoices.length,
-                        taxableValue: totalTaxableValue,
-                        cgst: totalCgst,
-                        sgst: totalSgst,
-                        igst: totalIgst,
-                        cess: b2bInvoices.reduce((sum, inv) => sum + inv.totalCess, 0),
-                        total: totalTaxableValue + totalTaxAmount
+                        count: filteredInvoices.length,
+                        taxableValue: filteredTotals.taxableValue,
+                        cgst: filteredTotals.cgst,
+                        sgst: filteredTotals.sgst,
+                        igst: filteredTotals.igst,
+                        cess: filteredTotals.cess,
+                        total: filteredTotals.taxableValue + filteredTotals.taxAmount
                       },
                       totals: {
-                        invoices: b2bInvoices.length,
-                        taxableValue: totalTaxableValue,
-                        cgst: totalCgst,
-                        sgst: totalSgst,
-                        igst: totalIgst,
-                        cess: b2bInvoices.reduce((sum, inv) => sum + inv.totalCess, 0),
-                        totalTax: totalTaxAmount,
-                        grandTotal: totalTaxableValue + totalTaxAmount
+                        invoices: filteredInvoices.length,
+                        taxableValue: filteredTotals.taxableValue,
+                        cgst: filteredTotals.cgst,
+                        sgst: filteredTotals.sgst,
+                        igst: filteredTotals.igst,
+                        cess: filteredTotals.cess,
+                        totalTax: filteredTotals.taxAmount,
+                        grandTotal: filteredTotals.taxableValue + filteredTotals.taxAmount
                       },
-                      recipientSummary: recipientSummary
+                      recipientSummary: filteredRecipientSummary
                     }}
-                    disabled={b2bInvoices.length === 0}
+                    disabled={filteredInvoices.length === 0}
                   />
                 </div>
                 <TaxSummary
                   data={{
                     b2b: {
-                      count: b2bInvoices.length,
-                      taxableValue: totalTaxableValue,
-                      cgst: totalCgst,
-                      sgst: totalSgst,
-                      igst: totalIgst,
-                      cess: b2bInvoices.reduce((sum, inv) => sum + inv.totalCess, 0),
-                      total: totalTaxableValue + totalTaxAmount
+                      count: filteredInvoices.length,
+                      taxableValue: filteredTotals.taxableValue,
+                      cgst: filteredTotals.cgst,
+                      sgst: filteredTotals.sgst,
+                      igst: filteredTotals.igst,
+                      cess: filteredTotals.cess,
+                      total: filteredTotals.taxableValue + filteredTotals.taxAmount
                     },
                     hsn: [],
                     totals: {
-                      invoices: b2bInvoices.length,
-                      taxableValue: totalTaxableValue,
-                      cgst: totalCgst,
-                      sgst: totalSgst,
-                      igst: totalIgst,
-                      cess: b2bInvoices.reduce((sum, inv) => sum + inv.totalCess, 0),
-                      totalTax: totalTaxAmount,
-                      grandTotal: totalTaxableValue + totalTaxAmount
+                      invoices: filteredInvoices.length,
+                      taxableValue: filteredTotals.taxableValue,
+                      cgst: filteredTotals.cgst,
+                      sgst: filteredTotals.sgst,
+                      igst: filteredTotals.igst,
+                      cess: filteredTotals.cess,
+                      totalTax: filteredTotals.taxAmount,
+                      grandTotal: filteredTotals.taxableValue + filteredTotals.taxAmount
                     },
-                    recipientSummary: recipientSummary
+                    recipientSummary: filteredRecipientSummary
                   }}
                 />
               </TabsContent>
               <TabsContent value="errors" className="mt-6">
                 <ErrorDetails errors={errors} />
+              </TabsContent>
+              <TabsContent value="testing" className="mt-6">
+                <JsonComparator />
               </TabsContent>
             </Tabs>
           </div>

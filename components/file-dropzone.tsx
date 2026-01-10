@@ -24,7 +24,7 @@ export function FileDropzone({ onFilesAdded }: FileDropzoneProps) {
       if (validFiles.length > 0) {
         onFilesAdded?.(validFiles);
       } else {
-        alert("Only .xlsx and .csv files are supported.")
+        alert("Only .xlsx, .csv, and .json files are supported.")
       }
 
       e.target.value = ''
@@ -57,7 +57,7 @@ export function FileDropzone({ onFilesAdded }: FileDropzoneProps) {
       if (validFiles.length > 0) {
         onFilesAdded?.(validFiles)
       } else {
-        alert("Only .xlsx and .csv files are supported.")
+        alert("Only .xlsx, .csv, and .json files are supported.")
       }
     }
   }

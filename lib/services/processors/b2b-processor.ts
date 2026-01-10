@@ -158,7 +158,7 @@ const B2B_HEADER_MAPPINGS: Record<string, string> = {
     // Item Details
     "hsn / sac code": "hsnCode", "hsn code": "hsnCode",
     "item description": "description",
-    "quantity": "quantity",
+    "quantity": "quantity", "qty": "quantity",
     "item unit uom": "unit", "unit": "unit"
 };
 
