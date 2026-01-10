@@ -14,9 +14,17 @@ A modern, web-based application for processing GST (Goods and Services Tax) invo
 - **✅ Real-time Validation**: Validate GSTINs, dates, tax rates, and amounts with detailed error reporting
 - **📈 Dashboard View**: Visual summary of invoices, tax liability, and validation status
 - **🔄 B2B & CDNR Support**: Handle both B2B sales invoices and Credit/Debit notes (CDNR)
-- **📥 JSON Export**: Generate GSTR-1 compliant JSON ready for GST Portal upload
+- **📥 Portal-Ready JSON Export**: Generate GSTR-1 JSON with all metadata fields required by GST Portal
 - **🌓 Dark Mode**: Beautiful UI with dark mode support
 - **🔒 Local Processing**: All data processing happens in your browser - no data sent to servers
+
+### Recent Updates (Jan 2025)
+
+- **Portal Metadata Fields**: JSON now includes `flag`, `updby`, `cflag`, and `fil_dt` for direct portal upload
+- **Rate-Based Item Numbers**: Uses GST portal convention (e.g., `1801` for 18% rate)
+- **Smart HSN Quantity**: Services (HSN starting with 99) automatically have `qty: 0`
+- **CGST/SGST Auto-Sync**: Template automatically copies CGST% to SGST%
+- **Zero-Value Field Omission**: Omits `iamt`, `camt`, `samt` when zero (portal convention)
 
 ## 🚀 Quick Start
 
@@ -54,6 +62,7 @@ Download the GST Excel template from the application or use `/public/GST_Templat
 Enter your invoice data in the template:
 - **B2B Sheet**: For sales invoices to registered businesses
 - **CDNR Sheet**: For Credit/Debit notes
+- **SGST% auto-fills** when you enter CGST%
 
 #### Required Fields for B2B:
 | Column | Description | Example |
@@ -74,7 +83,7 @@ Upload your filled Excel file and review the parsed data. Fix any validation err
 Enter your GSTIN and filing period, then download the GSTR-1 JSON file.
 
 ### Step 5: Upload to GST Portal
-Upload the generated JSON to the GST Portal for filing.
+Upload the generated JSON directly to the GST Portal for filing.
 
 ## 🛠️ Tech Stack
 
@@ -127,21 +136,41 @@ gst-filing-app/
 
 ## 📄 JSON Output Format
 
-The app generates GSTR-1 compliant JSON with the following sections:
+The app generates GSTR-1 compliant JSON with full portal metadata:
 
-- **b2b**: B2B invoices grouped by customer GSTIN
+- **b2b**: B2B invoices grouped by customer GSTIN (with `flag`, `updby`, `cflag`)
 - **cdnr**: Credit/Debit notes (when applicable)
-- **hsn**: HSN-wise summary of supplies
+- **hsn**: HSN-wise summary of supplies (Services have `qty: 0`)
 - **doc_issue**: Document issue summary
+- **fil_dt**: Filing date
 
 Example output structure:
 ```json
 {
-  "gstin": "29XXXXXXXXX1Z5",
-  "fp": "012024",
-  "b2b": [...],
-  "hsn": {...},
-  "doc_issue": {...}
+  "gstin": "33XXXXXXXXX1Z5",
+  "fp": "122025",
+  "filing_typ": "M",
+  "b2b": [
+    {
+      "ctin": "29AAGFL8538G2ZV",
+      "cfs": "N",
+      "inv": [{
+        "inum": "18/2025-26",
+        "idt": "26-12-2025",
+        "val": 28143,
+        "pos": "29",
+        "rchrg": "N",
+        "inv_typ": "R",
+        "flag": "U",
+        "updby": "S",
+        "cflag": "N",
+        "itms": [{ "num": 1801, "itm_det": { "rt": 18, "txval": 23850, "iamt": 4293 }}]
+      }]
+    }
+  ],
+  "hsn": { "flag": "N", "hsn_b2b": [...], "hsn_b2c": [] },
+  "doc_issue": { "flag": "N", "doc_det": [...] },
+  "fil_dt": "10-01-2026"
 }
 ```
 
