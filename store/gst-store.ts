@@ -222,12 +222,12 @@ export const useGSTStore = create<GSTStore>((set, get) => ({
             return Math.round(rate * 100) + 1;
         };
 
-        // Base structure with required root fields
+        // Base structure with required root fields (matching GST Offline Tool format)
         const gstr1: any = {
             gstin: gstin.toUpperCase(),
             fp: filingPeriod,
-            filing_typ: "M",  // Monthly filing
-            gt: 0.0,          // Gross turnover (float)
+            version: "GST3.2.4",  // GST Offline Tool version identifier
+            hash: "hash",         // Placeholder hash (literal string used by Offline Tool)
             cur_gt: 0.0,      // Current gross turnover (float)
         };
 
@@ -254,18 +254,15 @@ export const useGSTStore = create<GSTStore>((set, get) => ({
                     };
                 });
 
-                // Build invoice object with GST portal metadata fields
+                // Build invoice object - for NEW records, GST Offline Tool removes flag/updby/cflag
                 const invoiceObj: any = {
                     itms,
                     val: inv.invoiceValue,
                     inv_typ: "R",
-                    flag: "U",           // Upload flag - required by portal
                     pos: inv.placeOfSupply,
-                    updby: "S",          // Updated by System
                     idt: inv.invoiceDate,
                     rchrg: inv.reverseCharge,
                     inum: inv.invoiceNumber,
-                    cflag: "N",          // Correction flag
                 };
 
                 party.inv.push(invoiceObj);
@@ -361,9 +358,7 @@ export const useGSTStore = create<GSTStore>((set, get) => ({
                 };
             }
 
-            // Add filing date (required by portal)
-            const today = new Date();
-            gstr1.fil_dt = `${String(today.getDate()).padStart(2, '0')}-${String(today.getMonth() + 1).padStart(2, '0')}-${today.getFullYear()}`;
+            // Note: fil_dt is added by portal after filing, not needed for new uploads
         }
 
         if (returnType === 'CDNR' && cdnrInvoices.length > 0) {
