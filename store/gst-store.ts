@@ -222,13 +222,13 @@ export const useGSTStore = create<GSTStore>((set, get) => ({
             return Math.round(rate * 100) + 1;
         };
 
-        // Base structure with required root fields (matching GST Offline Tool format)
+        // Base structure with required root fields (matching portal-accepted JSON format)
         const gstr1: any = {
             gstin: gstin.toUpperCase(),
             fp: filingPeriod,
-            version: "GST3.2.4",  // GST Offline Tool version identifier
-            hash: "hash",         // Placeholder hash (literal string used by Offline Tool)
-            cur_gt: 0.0,      // Current gross turnover (float)
+            filing_typ: "M",   // Monthly filing type
+            gt: 0.0,           // Gross turnover
+            cur_gt: 0.0,       // Current gross turnover
         };
 
         if (returnType === 'B2B' && b2bInvoices.length > 0) {
@@ -254,15 +254,19 @@ export const useGSTStore = create<GSTStore>((set, get) => ({
                     };
                 });
 
-                // Build invoice object - for NEW records, GST Offline Tool removes flag/updby/cflag
+                // Build invoice object with all fields matching portal-accepted format
+                // Field order: itms, val, inv_typ, flag, pos, updby, idt, rchrg, inum, cflag
                 const invoiceObj: any = {
                     itms,
                     val: inv.invoiceValue,
                     inv_typ: "R",
+                    flag: "N",             // N = New record (no chksum needed)
                     pos: inv.placeOfSupply,
+                    updby: "S",            // S = System (not R = Recipient)
                     idt: inv.invoiceDate,
                     rchrg: inv.reverseCharge,
                     inum: inv.invoiceNumber,
+                    cflag: "N",            // N = No correction
                 };
 
                 party.inv.push(invoiceObj);
@@ -308,23 +312,22 @@ export const useGSTStore = create<GSTStore>((set, get) => ({
                 });
             });
 
-            // Build HSN entries, omitting zero-value tax fields
+            // Build HSN entries with exact field order matching portal format
+            // Field order: csamt, samt, rt, uqc, num, txval, qty, camt, hsn_sc, iamt, desc
             const hsnEntries = Array.from(hsnMap.values()).map((h, i) => {
                 const entry: any = {
                     csamt: h.csamt,
+                    samt: h.samt,          // Always include (even if 0)
                     rt: h.rt,
                     uqc: h.uqc,
                     num: i + 1,
                     txval: h.txval,
-                    qty: 0, // GST portal uses 0 for qty
+                    qty: 0,                // GST portal uses 0 for qty
+                    camt: h.camt,          // Always include (even if 0)
                     hsn_sc: h.hsn_sc,
+                    iamt: h.iamt,          // Always include (even if 0)
                     desc: h.desc,
                 };
-
-                // Only include non-zero tax amounts
-                if (h.iamt > 0) entry.iamt = h.iamt;
-                if (h.camt > 0) entry.camt = h.camt;
-                if (h.samt > 0) entry.samt = h.samt;
 
                 return entry;
             });
