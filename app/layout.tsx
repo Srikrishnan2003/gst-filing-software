@@ -12,6 +12,14 @@ export const metadata: Metadata = {
   title: "GST Return Filing - Professional Tax Management",
   description: "Enterprise-grade GST return filing application",
 
+  // Viewport with safe-area support for mobile app
+  viewport: {
+    width: 'device-width',
+    initialScale: 1,
+    maximumScale: 1,
+    viewportFit: 'cover',
+  },
+
   icons: {
     icon: [
       {
